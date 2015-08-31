@@ -68,7 +68,17 @@
       (filter #(not (.isDirectory %)))
       (map #(.getPath %))))
 
-
+(defn getFile [operator_id password path]
+  (let [path-vec (s/split path #"/")
+        uri (str "/" (path-vec 3) "/" (path-vec 4))
+        date (to-GMT)
+        result @(http/get path
+                          {:headers {"Authorization" (str "UpYun " operator_id ":" (sign "GET" uri date 0 password))
+                                     "Date" date}})
+        {status :status body :body} result]
+    (if (= status 200)
+      {:ok (slurp body)}
+      {:error body})))
 
 (defn uploadFile [operator_id password path]
   (let [file (file path)
