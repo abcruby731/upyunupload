@@ -80,6 +80,21 @@
       {:ok body}
       {:error body})))
 
+(defn deleteFile [operator_id password path]
+  (let [path-vec (s/split path #"/")
+        uri (str "/" (path-vec 3) "/" (path-vec 4))
+        date (to-GMT)
+        result @(http/delete path
+                             {:headers {"Authorization" (str "UpYun " operator_id ":" (sign "DELETE" uri date 0 password))
+                                        "Date" date}})
+        _ (prn result)
+        {status :status body :body} result]
+    (if (= status 200)
+      (do
+        (delete-from-db :testpictures ["link = ?" path])
+        {:ok nil})
+      {:error body})))
+
 (defn uploadFile [operator_id password path]
   (let [file (file path)
         uri (str "/test-hoolay/" (System/currentTimeMillis) ".jpg")
