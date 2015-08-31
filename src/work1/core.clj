@@ -77,7 +77,7 @@
                                      "Date" date}})
         {status :status body :body} result]
     (if (= status 200)
-      {:ok (slurp body)}
+      {:ok body}
       {:error body})))
 
 (defn uploadFile [operator_id password path]
