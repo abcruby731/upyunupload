@@ -6,9 +6,12 @@
             [clj-time.core :as time]
             [clj-time.format]
             [clojure.string :as s]
-            [clojure.java.io :as io :refer [input-stream file]])
+            [clojure.java.io :as io :refer [input-stream file]]
+            [flake.core :as flake :refer [id]])
   (:import [java.security.MessageDigest]
            [java.math.BigInteger]))
+
+(flake/init!)
 
 (let [db-host "localhost"
       db-port 5432
@@ -46,6 +49,16 @@
   (jdbc/with-db-connection [conn db-spec]
     (jdbc/delete! conn tablename psql)))
 
+(defn string-to-int [map]
+  (let [{:strs [virtual_college_id user_serial_id]} map]
+    (conj map {"virtual_college_id" (Integer/parseInt virtual_college_id) "user_serial_id" (Integer/parseInt user_serial_id)})))
+
+(defn import-db [tablename file]
+  (dorun (->> (parse-csv (slurp file))
+              (map string-to-int)
+              (map #(conj % ["identity" (id)]))
+              (map #(insert-db tablename %)))))
+
 (defn app [req]
   {:status 200
    :headers {"Content-Type" "text/plain"}
@@ -66,7 +79,8 @@
   (->> (io/file absolute-path)
       file-seq
       (filter #(not (.isDirectory %)))
-      (map #(.getPath %))))
+      (map #(.getPath %))
+      sort))
 
 (defn getFile [operator_id password path]
   (let [path-vec (s/split path #"/")
@@ -101,7 +115,7 @@
         url (str "http://v0.api.upyun.com" uri)
         date (to-GMT)
         filelength (.length file)
-        _ (prn uri)
+        _ (prn path)
         result @(http/put url
                           {:headers {"Authorization" (str "UpYun " operator_id ":" (sign "PUT" uri date filelength password))
                                      "Date" date
@@ -111,12 +125,21 @@
     (if (= (:status result) 200)
       (let [{:keys [x-upyun-width x-upyun-height x-upyun-frames x-upyun-file-type]} (:headers result)
             path-vec (s/split path #"/")
-            college-id (path-vec 5)
-            art-id (path-vec 6)
+            virtual-college-id (Integer/parseInt (path-vec 5))
+            user-serial-id (Integer/parseInt (path-vec 6))
             filename (last path-vec)
-            work-id (first (s/split filename #"-"))
-            user-id ((first (query-from-db ["select * from users where 院校序号 = ? and 艺术家序号 = ?" college-id (str (Integer/parseInt art-id))])) :id)]
-        (insert-db :testpictures {:user_id user-id, :work_id (Integer/parseInt work-id), :link url, :width (Integer/parseInt x-upyun-width), :height (Integer/parseInt x-upyun-height)})
+            art-serial-id (Integer/parseInt (first (s/split filename #"-")))
+            picture-serial-id (Integer/parseInt (first (s/split (last (s/split filename #"-")) #"\.")))
+            virtual-user-id ((first (query-from-db ["select * from virtual_users where virtual_college_id = ? and user_serial_id = ?" virtual-college-id user-serial-id])) :id)
+            middle-file (read-string (slurp "last.txt"))]
+        (when (not (and (= virtual-college-id (middle-file :last-college-id))
+                        (= user-serial-id (middle-file :last-user-serial-id))
+                        (= art-serial-id (middle-file :last-art-serial-id))))
+          (let [virtual-art-id ((first (insert-db :virtual_arts {:identity (id), :virtual_user_id virtual-user-id})) :id)]
+            (spit "last.txt" (conj middle-file {:last-art-id virtual-art-id}))))
+        (let [middle-file1 (read-string (slurp "last.txt"))]
+          (insert-db :virtual_pictures {:virtual_user_id virtual-user-id, :virtual_art_id (middle-file1 :last-art-id), :width (Integer/parseInt x-upyun-width), :height (Integer/parseInt x-upyun-height), :link url})
+          (spit "last.txt" (conj middle-file1 {:last-college-id virtual-college-id :last-user-serial-id user-serial-id :last-art-serial-id art-serial-id :last-picture-serial-id picture-serial-id})))
         ;;insert-db
         {:ok {:width x-upyun-width
               :height x-upyun-height
