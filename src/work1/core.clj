@@ -160,9 +160,9 @@
                                          "Content-Length" (str filelength)}
                                :body (input-stream file)})
             _ (prn result)]
-        (if (= 1 1);;(= (:status result) 200)
+        (if (= (:status result) 200)
           (let [{:keys [x-upyun-width x-upyun-height x-upyun-frames x-upyun-file-type]} (:headers result)
-                csv-picture-id (first (s/split (last (s/split filename #"[-_]+")) #"\."))
+                csv-picture-id (first (s/split (last (s/split filename #"[\－\-\_]+")) #"\."))
                 middle-file1 (read-string (slurp "last.txt"))]
             (when (not (and (= csv-college-id (middle-file1 :last-csv-college-id))
                             (= csv-user-id (middle-file1 :last-csv-user-id))
