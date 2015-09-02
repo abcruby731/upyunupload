@@ -11,8 +11,8 @@
   (:import [java.security.MessageDigest]
            [java.math.BigInteger]))
 
-(def temp-storage (atom {:colleges nil
-                         :users nil}))
+;; (def temp-storage (atom {:colleges nil
+;;                          :users nil}))
 
 ;; (swap! temp-storage assoc-in [:colleges 1] #{1 2 3})
 
@@ -79,10 +79,10 @@
           )))
     ))
 
-(defn app [req]
-  {:status 200
-   :headers {"Content-Type" "text/plain"}
-   :body req})
+;; (defn app [req]
+;;   {:status 200
+;;    :headers {"Content-Type" "text/plain"}
+;;    :body req})
 
 ;; (defn filename [local-path]
 ;;   (last (s/split local-path #"/")))
@@ -110,32 +110,32 @@
          (filter #(= (count (s/split % #"/")) 8)))
     ))
 
-(defn getFile [operator_id password path]
-  (let [path-vec (s/split path #"/")
-        uri (str "/" (path-vec 3) "/" (path-vec 4))
-        date (to-GMT)
-        result @(http/get path
-                          {:headers {"Authorization" (str "UpYun " operator_id ":" (sign "GET" uri date 0 password))
-                                     "Date" date}})
-        {status :status body :body} result]
-    (if (= status 200)
-      {:ok body}
-      {:error body})))
+;; (defn getFile [operator_id password path]
+;;   (let [path-vec (s/split path #"/")
+;;         uri (str "/" (path-vec 3) "/" (path-vec 4))
+;;         date (to-GMT)
+;;         result @(http/get path
+;;                           {:headers {"Authorization" (str "UpYun " operator_id ":" (sign "GET" uri date 0 password))
+;;                                      "Date" date}})
+;;         {status :status body :body} result]
+;;     (if (= status 200)
+;;       {:ok body}
+;;       {:error body})))
 
-(defn deleteFile [operator_id password path]
-  (let [path-vec (s/split path #"/")
-        uri (str "/" (path-vec 3) "/" (path-vec 4))
-        date (to-GMT)
-        result @(http/delete path
-                             {:headers {"Authorization" (str "UpYun " operator_id ":" (sign "DELETE" uri date 0 password))
-                                        "Date" date}})
-        _ (prn result)
-        {status :status body :body} result]
-    (if (= status 200)
-      (do
-        (delete-from-db :testpictures ["link = ?" path])
-        {:ok nil})
-      {:error body})))
+;; (defn deleteFile [operator_id password path]
+;;   (let [path-vec (s/split path #"/")
+;;         uri (str "/" (path-vec 3) "/" (path-vec 4))
+;;         date (to-GMT)
+;;         result @(http/delete path
+;;                              {:headers {"Authorization" (str "UpYun " operator_id ":" (sign "DELETE" uri date 0 password))
+;;                                         "Date" date}})
+;;         _ (prn result)
+;;         {status :status body :body} result]
+;;     (if (= status 200)
+;;       (do
+;;         (delete-from-db :testpictures ["link = ?" path])
+;;         {:ok nil})
+;;       {:error body})))
 
 (defn uploadFile [operator_id password path]
   (let [_ (prn path)
@@ -151,7 +151,6 @@
         csv-art-id (first (take-last 2 (s/split filename #"[\－\-\_]+")))
         middle-file (read-string (slurp "data-rela.txt"))
         virtual-user-id (middle-file [csv-college-id (s3 csv-user-id)])]
-    (when (= csv-art-id "") (prn path))
     (if (nil? virtual-user-id)
       (prn "users not exist: " csv-college-id "/" csv-user-id)
       (let [result @(http/put url
@@ -192,16 +191,13 @@
     (doseq [path paths]
       (uploadFile operator_id password path))))
 
-(defn uploadFile+ [operator_id password path]
-  (map #(uploadFile operator_id password %) (all-file-path path)))
+;; (defonce server (atom nil))
 
-(defonce server (atom nil))
+;; (defn stop-server []
+;;   (when-not (nil? @server)
+;;     (@server :timeout 100)
+;;     (reset! server nil)))
 
-(defn stop-server []
-  (when-not (nil? @server)
-    (@server :timeout 100)
-    (reset! server nil)))
-
-(defn -main [& args]
-  (reset! server (run-server #'app {:port 8080}))
-  (prn "Server started!"))
+;; (defn -main [& args]
+;;   (reset! server (run-server #'app {:port 8080}))
+;;   (prn "Server started!"))
