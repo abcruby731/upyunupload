@@ -11,6 +11,11 @@
   (:import [java.security.MessageDigest]
            [java.math.BigInteger]))
 
+(def temp-storage (atom {:colleges nil
+                         :users nil}))
+
+;; (swap! temp-storage assoc-in [:colleges 1] #{1 2 3})
+
 (flake/init!)
 
 (let [db-host "localhost"
@@ -49,38 +54,61 @@
   (jdbc/with-db-connection [conn db-spec]
     (jdbc/delete! conn tablename psql)))
 
-(defn string-to-int [map]
-  (let [{:strs [virtual_college_id user_serial_id]} map]
-    (conj map {"virtual_college_id" (Integer/parseInt virtual_college_id) "user_serial_id" (Integer/parseInt user_serial_id)})))
+;; (defn string-to-int [map]
+;;   (let [{:strs [virtual_college_id user_serial_id]} map]
+;;     (conj map {"virtual_college_id" (Integer/parseInt virtual_colLege_id)
+;;                "user_serial_id" (Integer/parseInt user_serial_id)})))
+
+(defn s3 [s]
+  (cond
+    (= (count s) 1) (str "00" s)
+    (= (count s) 2) (str "0" s)
+    (= (count s) 3) (str s)))
 
 (defn import-db [tablename file]
-  (dorun (->> (parse-csv (slurp file))
-              (map string-to-int)
-              (map #(conj % ["identity" (id)]))
-              (map #(insert-db tablename %)))))
+  (let [middle-file (read-string (slurp "last.txt"))]
+    (let [result (->> (parse-csv (slurp file) :key :keyword)
+                      (map #(assoc % :identity (id) :virtual_college_id (middle-file (:csv_college_id %)))))]
+      (doseq [x result]
+        (let [{:keys [csv_college_id csv_user_id]} x
+              x (dissoc x :csv_college_id :csv_user_id)
+              _ (prn x)
+              new-row (first (insert-db tablename x))
+              new-user-id (:id new-row)]
+          (spit "data-rela.txt" (assoc (read-string (slurp "data-rela.txt")) [csv_college_id (s3 csv_user_id)] new-user-id))
+          )))
+    ))
 
 (defn app [req]
   {:status 200
    :headers {"Content-Type" "text/plain"}
    :body req})
 
-;; (defn certify [bucket user_id pass]
-;;   (http/get "http://v0.api.upyun.com/bucket"
-;;             {:headers {"Authorization" ""}}))
-
 ;; (defn filename [local-path]
 ;;   (last (s/split local-path #"/")))
 
 ;; (defn get-path [file] (.getPath file))
 ;; (defn isfile? [file] (not (.isDirectory file)))
+
+(defn DS_Store? [file]
+  (let [extension (last (s/split file #"\."))]
+    (if (= extension "DS_Store")
+      true
+      false)))
+
 (defn all-file-path
   "得到一个文件夹下所有文件的绝对路径（包括子文件夹包含的文件）"
   [absolute-path]
-  (->> (io/file absolute-path)
-      file-seq
-      (filter #(not (.isDirectory %)))
-      (map #(.getPath %))
-      sort))
+  (let [middle-file (read-string (slurp "last.txt"))]
+    (->> (io/file absolute-path)
+         file-seq
+         (filter #(not (.isDirectory %)))
+         (map #(.getPath %))
+         sort
+         (filter #(not (DS_Store? %)))
+         (filter #(> (compare % (:last-uploadfile middle-file)) 0))
+         (filter #(= (count (s/split % #"/")) 8)))
+    ))
 
 (defn getFile [operator_id password path]
   (let [path-vec (s/split path #"/")
@@ -110,43 +138,52 @@
       {:error body})))
 
 (defn uploadFile [operator_id password path]
-  (let [file (file path)
-        uri (str "/test-hoolay/" (System/currentTimeMillis) ".jpg")
-        url (str "http://v0.api.upyun.com" uri)
+  (let [_ (prn path)
         date (to-GMT)
+        file (file path)
         filelength (.length file)
-        _ (prn path)
-        result @(http/put url
-                          {:headers {"Authorization" (str "UpYun " operator_id ":" (sign "PUT" uri date filelength password))
-                                     "Date" date
-                                     "Content-Length" (str filelength)}
-                           :body (input-stream file)})
-        _ (prn result)]
-    (if (= (:status result) 200)
-      (let [{:keys [x-upyun-width x-upyun-height x-upyun-frames x-upyun-file-type]} (:headers result)
-            path-vec (s/split path #"/")
-            virtual-college-id (Integer/parseInt (path-vec 5))
-            user-serial-id (Integer/parseInt (path-vec 6))
-            filename (last path-vec)
-            art-serial-id (Integer/parseInt (first (s/split filename #"-")))
-            picture-serial-id (Integer/parseInt (first (s/split (last (s/split filename #"-")) #"\.")))
-            virtual-user-id ((first (query-from-db ["select * from virtual_users where virtual_college_id = ? and user_serial_id = ?" virtual-college-id user-serial-id])) :id)
-            middle-file (read-string (slurp "last.txt"))]
-        (when (not (and (= virtual-college-id (middle-file :last-college-id))
-                        (= user-serial-id (middle-file :last-user-serial-id))
-                        (= art-serial-id (middle-file :last-art-serial-id))))
-          (let [virtual-art-id ((first (insert-db :virtual_arts {:identity (id), :virtual_user_id virtual-user-id})) :id)]
-            (spit "last.txt" (conj middle-file {:last-art-id virtual-art-id}))))
-        (let [middle-file1 (read-string (slurp "last.txt"))]
-          (insert-db :virtual_pictures {:virtual_user_id virtual-user-id, :virtual_art_id (middle-file1 :last-art-id), :width (Integer/parseInt x-upyun-width), :height (Integer/parseInt x-upyun-height), :link url})
-          (spit "last.txt" (conj middle-file1 {:last-college-id virtual-college-id :last-user-serial-id user-serial-id :last-art-serial-id art-serial-id :last-picture-serial-id picture-serial-id})))
-        ;;insert-db
-        {:ok {:width x-upyun-width
-              :height x-upyun-height
-              :frames x-upyun-frames
-              :type x-upyun-file-type
-              :url url}})
-      {:error (:body result)})
+        [_ _ _ _ _ csv-college-id csv-user-id filename] (s/split path #"/")
+        extension (str "."(last (s/split filename #"\.")))
+        link (str "/" (id) extension)
+        uri (str "/test-hoolay" link)
+        url (str "http://v0.api.upyun.com" uri)
+        ;;_ (prn "Debug: " {:filename path})
+        csv-art-id (first (take-last 2 (s/split filename #"[\－\-\_]+")))
+        middle-file (read-string (slurp "data-rela.txt"))
+        virtual-user-id (middle-file [csv-college-id (s3 csv-user-id)])]
+    (when (= csv-art-id "") (prn path))
+    (if (nil? virtual-user-id)
+      (prn "users not exist: " csv-college-id "/" csv-user-id)
+      (let [result @(http/put url
+                              {:headers {"Authorization" (str "UpYun " operator_id ":" (sign "PUT" uri date filelength password))
+                                         "Date" date
+                                         "Content-Length" (str filelength)}
+                               :body (input-stream file)})
+            _ (prn result)]
+        (if (= 1 1);;(= (:status result) 200)
+          (let [{:keys [x-upyun-width x-upyun-height x-upyun-frames x-upyun-file-type]} (:headers result)
+                csv-picture-id (first (s/split (last (s/split filename #"[-_]+")) #"\."))
+                middle-file1 (read-string (slurp "last.txt"))]
+            (when (not (and (= csv-college-id (middle-file1 :last-csv-college-id))
+                            (= csv-user-id (middle-file1 :last-csv-user-id))
+                            (= csv-art-id (middle-file1 :last-csv-art-id))))
+              (let [virtual-art-id ((first (insert-db :virtual_arts {:identity (id), :virtual_user_id virtual-user-id})) :id)]
+                (spit "last.txt" (assoc middle-file1 :last-virtual-art-id virtual-art-id))))
+            (let [middle-file1 (read-string (slurp "last.txt"))]
+              (insert-db :virtual_pictures {:virtual_user_id virtual-user-id,
+                                            :virtual_art_id (middle-file1 :last-virtual-art-id),
+                                            :width (Integer/parseInt x-upyun-width),
+                                            :height (Integer/parseInt x-upyun-height),
+                                            :link link})
+              (spit "last.txt" (conj middle-file1 {:last-csv-college-id csv-college-id :last-csv-user-id csv-user-id :last-csv-art-id csv-art-id :last-csv-picture-id csv-picture-id :last-uploadfile path})))
+            {:ok {:width x-upyun-width
+                  :height x-upyun-height
+                  :frames x-upyun-frames
+                  :type x-upyun-file-type
+                  :url url}}
+            )
+          {:error (:body result)
+           })))
     ))
 
 (defn upload
